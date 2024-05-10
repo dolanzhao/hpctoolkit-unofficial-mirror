@@ -65,6 +65,9 @@ public:
   /// Sources and corresponding paths specified as arguments.
   std::vector<std::pair<std::unique_ptr<ProfileSource>, stdshim::filesystem::path>> sources;
 
+  /// Index of the argument group the source belongs to.
+  std::vector<std::size_t> source_args;
+
   /// KernelSymbols Finalizers from properly named measurements directories
   std::vector<std::pair<std::unique_ptr<ProfileFinalizer>, stdshim::filesystem::path>> ksyms;
 
@@ -145,9 +148,6 @@ public:
   /// Path for the root database directory, or output file
   stdshim::filesystem::path output;
 
-  /// Whether to (not) search the current filesystem for binaries and source files
-  bool foreign;
-
   /// Whether to copy sources into the output database
   bool include_sources;
 
@@ -172,10 +172,12 @@ public:
   bool valgrindUnclean;
 
 private:
+  bool foreign;
   std::once_flag onceMissingGPUCFGs;
   std::unordered_set<stdshim::filesystem::path, stdshim::hash_path> structpaths;
   std::unordered_map<stdshim::filesystem::path, std::vector<stdshim::filesystem::path>,
                      stdshim::hash_path> structheads;
+  std::unordered_set<stdshim::filesystem::path, stdshim::hash_path> allowedForeignDirs;
 };
 
 }

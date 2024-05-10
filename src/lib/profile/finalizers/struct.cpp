@@ -117,7 +117,7 @@ struct LHandler : public DefaultHandler {
 
 namespace hpctoolkit::finalizers::detail {
 struct LMData {
-  std::string path;
+  stdshim::filesystem::path path;
   bool has_calls;
 };
 
@@ -133,7 +133,7 @@ public:
 
   bool valid() const noexcept { return ok; }
 
-  std::optional<LMData> seekToNextLM() noexcept;
+  std::optional<LMData> seekToNextLM(const stdshim::filesystem::path measDirPath) noexcept;
   bool parse(ProfilePipeline::Source&, const Module&, bool, StructFile::udModule&) noexcept;
 
 private:
@@ -146,8 +146,8 @@ private:
 using LMData = hpctoolkit::finalizers::detail::LMData;
 using StructFileParser = hpctoolkit::finalizers::detail::StructFileParser;
 
-StructFile::StructFile(stdshim::filesystem::path p, std::shared_ptr<RecommendationStore> rs)
-  : recstore(std::move(rs)), path(std::move(p)) {
+StructFile::StructFile(stdshim::filesystem::path p, stdshim::filesystem::path meas, std::shared_ptr<RecommendationStore> rs)
+  : recstore(std::move(rs)), path(stdshim::filesystem::absolute(std::move(p))), measDirPath(stdshim::filesystem::canonical(meas)) {
   while(1) {  // Exit on EOF or error
     auto parser = std::make_unique<StructFileParser>(path);
     if(!parser->valid()) {
@@ -157,7 +157,7 @@ StructFile::StructFile(stdshim::filesystem::path p, std::shared_ptr<Recommendati
 
     auto lm = std::make_unique<LMData>();
     do {
-      if(auto o_lm = parser->seekToNextLM()) {
+      if(auto o_lm = parser->seekToNextLM(measDirPath)) {
         *lm = std::move(*o_lm);
       } else {
         // EOF or error
@@ -319,9 +319,17 @@ void StructFile::load(const Module& m, udModule& ud) noexcept {
   std::unique_ptr<StructFileParser> parser;
   {
     std::unique_lock<std::mutex> l(lms_lock);
+
+    // Structfiles are (usually) generated on the system where the measurement
+    // took place, so try to match against the path seen during measurement
+    // first.
     auto it = lms.find(m.path());
+    // It might have been generated on the current system instead. In that case,
+    // we want the path to the file on the current filesystem (resolvedPath).
     if(it == lms.end()) it = lms.find(m.userdata[sink.resolvedPath()]);
+    // Otherwise, give up. This Structfile doesn't match the Module.
     if(it == lms.end()) return;  // We got nothing
+
     std::tie(lm, parser) = std::move(it->second);
     lms.erase(it);
   }
@@ -351,7 +359,7 @@ StructFileParser::StructFileParser(const stdshim::filesystem::path& path) noexce
   }
 }
 
-std::optional<LMData> StructFileParser::seekToNextLM() noexcept try {
+std::optional<LMData> StructFileParser::seekToNextLM(const stdshim::filesystem::path measDirPath) noexcept try {
   assert(ok);
   ok = false;
   LMData lm;
@@ -359,6 +367,15 @@ std::optional<LMData> StructFileParser::seekToNextLM() noexcept try {
   LHandler handler([&](const std::string& ename, const Attributes& attr){
     if(ename == "LM") {
       lm.path = xmlstr(attr.getValue(XMLStr("n")));
+      if(!lm.path.has_root_path()){
+        if(measDirPath.empty()){
+          util::log::warning{} << "No measurement directory path provided for a load module with relative path "
+                  << lm.path << ", so we ignore this StructFile\n";
+          lm.path = "";
+        }else{
+          lm.path = measDirPath / lm.path;
+        }
+      }
       lm.has_calls = xmlstr(attr.getValue(XMLStr("has-calls"))) == "1";
     }
   }, [&](const std::string& ename){

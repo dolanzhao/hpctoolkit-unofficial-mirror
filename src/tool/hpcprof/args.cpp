@@ -132,6 +132,9 @@ Processing options:
                               data from. Units are K,M,G,T (powers of 1024)
                               If limit is "unlimited," always parses DWARF.
                               Default limit is 100M.
+      --ignore-structs
+                              Ignore hpcstruct files in measurement directories
+                              (the structs/ subdirectory). Used for testing.
       --foreign
                               Process the measurements as if they came from a
                               "foreign" system with a different filesystem than
@@ -168,6 +171,7 @@ ProfArgs::ProfArgs(int argc, char* const argv[])
   int arg_overwriteOutput = 0;
   int arg_valgrindUnclean = valgrindUnclean;
   int arg_foreign = 0;
+  int arg_ignore_structs = 0;
   struct option longopts[] = {
     // These first ones are more special and must be in this order.
     {"metric-db", required_argument, NULL, 0},
@@ -189,6 +193,7 @@ ProfArgs::ProfArgs(int argc, char* const argv[])
     {"force", no_argument, &arg_overwriteOutput, 1},
     {"valgrind-unclean", no_argument, &arg_valgrindUnclean, 1},
     {"foreign", no_argument, &arg_foreign, 1},
+    {"ignore-structs", no_argument, &arg_ignore_structs, 1},
     {0, 0, 0, 0}
   };
 
@@ -243,7 +248,7 @@ ProfArgs::ProfArgs(int argc, char* const argv[])
       fs::path path(optarg);
       std::unique_ptr<finalizers::StructFile> c;
       try {
-        c.reset(new finalizers::StructFile(path,
+        c.reset(new finalizers::StructFile(path, fs::path(),
             std::make_shared<finalizers::StructFile::RecommendationStore>(false)));
       } catch(...) {
         std::cerr << "Invalid structure file '" << optarg << "'!\n";
@@ -420,9 +425,6 @@ ProfArgs::ProfArgs(int argc, char* const argv[])
   valgrindUnclean = arg_valgrindUnclean;
   foreign = arg_foreign;
 
-  if(foreign)
-    include_sources = false;
-
   {
     util::log::Settings logSettings = util::log::Settings::none;
     logSettings.error() = verbosity >= -1;  // -q and higher
@@ -516,10 +518,13 @@ ProfArgs::ProfArgs(int argc, char* const argv[])
   for(int idx = optind; idx < argc; idx++) {
     fs::path p(argv[idx]);
     if(fs::is_directory(p)) {
+      // Measurement directories are permitted for --foreign analysis
+      allowedForeignDirs.emplace(fs::canonical(p));
+
       // Check for a kernel_symbols/ directory for ksymsfiles.
       fs::path sp = p / "kernel_symbols";
       if(fs::is_directory(sp))
-        ProfArgs::ksyms.emplace_back(std::make_unique<finalizers::KernelSymbols>(sp), sp);
+        ProfArgs::ksyms.emplace_back(std::make_unique<finalizers::KernelSymbols>(), p);
 
       // Construct the recommended arguments for hpcstruct, in case we need them
       std::string structargs;
@@ -531,31 +536,33 @@ ProfArgs::ProfArgs(int argc, char* const argv[])
         structargs = ss.str();
       }
 
-      // Check for a structs/ directory for extra structfiles.
-      sp = p / "structs";
-      if(fs::is_directory(sp)) {
-        std::shared_ptr<finalizers::StructFile::RecommendationStore> recstore;
-        if(mpi::World::rank() == 0)
-          recstore = std::make_shared<finalizers::StructFile::RecommendationStore>(true, std::move(structargs));
+      if(!arg_ignore_structs) {
+        // Check for a structs/ directory for extra structfiles.
+        sp = p / "structs";
+        if(fs::is_directory(sp)) {
+          std::shared_ptr<finalizers::StructFile::RecommendationStore> recstore;
+          if(mpi::World::rank() == 0)
+            recstore = std::make_shared<finalizers::StructFile::RecommendationStore>(true, std::move(structargs));
 
-        for(const auto& de: fs::directory_iterator(sp)) {
-          std::unique_ptr<ProfileFinalizer> c;
-          if(de.path().extension() != ".hpcstruct") continue;
-          try {
-            c.reset(new finalizers::StructFile(de, recstore));
-          } catch(...) { continue; }
-          ProfArgs::structs.emplace_back(std::move(c), de);
-        }
-      } else {
-        util::call_once(onceMissingGPUCFGs, [&]{
-          // WARN that the user should run hpcstruct on the measurements dir first
-          if(mpi::World::rank() == 0) {
-            util::log::warning() <<
-              "Program structure data is missing from the measurements directory, performance attribution will be degraded\n"
-              "  Consider running hpcstruct first:\n"
-              "    $ hpcstruct" << structargs;
+          for(const auto& de: fs::directory_iterator(sp)) {
+            std::unique_ptr<ProfileFinalizer> c;
+            if(de.path().extension() != ".hpcstruct") continue;
+            try {
+              c.reset(new finalizers::StructFile(de, p, recstore));
+            } catch(...) { continue; }
+            ProfArgs::structs.emplace_back(std::move(c), de);
           }
-        });
+        } else {
+          util::call_once(onceMissingGPUCFGs, [&]{
+            // WARN that the user should run hpcstruct on the measurements dir first
+            if(mpi::World::rank() == 0) {
+              util::log::warning() <<
+                "Program structure data is missing from the measurements directory, performance attribution will be degraded\n"
+                "  Consider running hpcstruct first:\n"
+                "    $ hpcstruct" << structargs;
+            }
+          });
+        }
       }
     }
   }
@@ -616,10 +623,14 @@ ProfArgs::ProfArgs(int argc, char* const argv[])
     {
       ANNOTATE_HAPPENS_AFTER(&start_arc);
       decltype(sources) my_sources;
+      decltype(source_args) my_source_args;
       #pragma omp for schedule(dynamic) nowait
       for(std::size_t i = 0; i < files.size(); i++) {
         auto pg = std::move(files[i]);
-        auto s = ProfileSource::create_for(pg.first);
+        auto arg = optind + pg.second;
+        fs::path meas = argv[arg];
+        if(!fs::is_directory(meas)) meas = "";
+        auto s = ProfileSource::create_for(pg.first, meas);
         if(!only_exes.empty()) {
           if(auto* r4 = dynamic_cast<hpctoolkit::sources::Hpcrun4*>(s.get()); r4 != nullptr) {
             if(only_exes.count(r4->exe_basename()) == 0)
@@ -628,6 +639,7 @@ ProfArgs::ProfArgs(int argc, char* const argv[])
         }
         if(s) {
           my_sources.emplace_back(std::move(s), std::move(pg.first));
+          my_source_args.emplace_back(std::move(arg));
           cnts_a[pg.second].fetch_add(1, std::memory_order_relaxed);
         } else if(pg.first.extension() == profileext) {
           util::log::warning{} << pg.first.string() <<
@@ -637,6 +649,7 @@ ProfArgs::ProfArgs(int argc, char* const argv[])
       {
         std::unique_lock<std::mutex> l(sources_lock);
         for(auto& sp: my_sources) sources.emplace_back(std::move(sp));
+        for(auto& sp: my_source_args) source_args.emplace_back(std::move(sp));
       }
       ANNOTATE_HAPPENS_BEFORE(&end_arc);
     }
@@ -669,23 +682,30 @@ ProfArgs::ProfArgs(int argc, char* const argv[])
   std::size_t limit = totalcnt / mpi::World::size();
   std::uint32_t avail = sources.size() < limit+1 ? limit+1 - sources.size() : 0;
   std::vector<std::string> extra;
+  std::vector<std::size_t> extra_args;
   if(sources.size() > 0) {
     for(std::size_t i = sources.size()-1; i > limit; i--) {
       assert(i == sources.size()-1);
+      assert(i == source_args.size()-1);
       extra.emplace_back(std::move(sources.back().second).string());
+      extra_args.emplace_back(std::move(source_args.back()));
       sources.pop_back();
+      source_args.pop_back();
     }
   }
   auto avails = mpi::gather(avail, 0);
   auto extras = mpi::gather(std::move(extra), 0);
+  auto extras_args = mpi::gather(std::move(extra_args), 0);
 
   // Allocate extra strings to ranks with available slots.
   if(avails && extras) {
     std::vector<std::vector<std::string>> allocations(mpi::World::size());
+    std::vector<std::vector<std::size_t>> allocations_args(mpi::World::size());
     std::size_t next = 0;
     bool nearfull = false;
-    for(auto& ps: *extras) {
-      for(auto& p: ps) {
+    for(uint32_t i = 0; i < (*extras).size(); i++) {
+      auto& ps = (*extras)[i];
+      for(uint32_t j = 0; j < ps.size(); j++) {
         while(1) {
           while(next < avails->size() && (*avails)[next] <= (nearfull ? 0 : 1)) {
             next++;
@@ -696,19 +716,28 @@ ProfArgs::ProfArgs(int argc, char* const argv[])
           nearfull = true;
           next = 0;
         }
-        allocations[next].emplace_back(std::move(p));
+        allocations[next].emplace_back(std::move(ps[j]));
+        allocations_args[next].emplace_back(std::move((*extras_args)[i][j]));
         (*avails)[next] -= 1;
       }
     }
     extra = mpi::scatter(std::move(allocations), 0);
-  } else extra = mpi::scatter<std::vector<std::string>>(0);
+    extra_args = mpi::scatter(std::move(allocations_args), 0);
+  } else{
+    extra = mpi::scatter<std::vector<std::string>>(0);
+    extra_args = mpi::scatter<std::vector<std::size_t>>(0);
+  }
 
   // Add the inputs newly allocated to us to our set
-  for(auto& p_s: extra) {
-    stdshim::filesystem::path p = std::move(p_s);
-    auto s = ProfileSource::create_for(p);
+  for(uint32_t i = 0; i < extra.size(); i++) {
+    fs::path p = std::move(extra[i]);
+    auto arg = std::move(extra_args[i]);
+    fs::path meas = argv[arg];
+    if (!fs::is_directory(meas)) meas = "";
+    auto s = ProfileSource::create_for(p, meas);
     if(!s) util::log::fatal{} << "Input " << p << " has changed on disk, please let it stabilize before continuing!";
     sources.emplace_back(std::move(s), std::move(p));
+    source_args.emplace_back(std::move(arg));
   }
 }
 
@@ -732,22 +761,6 @@ static std::pair<bool, fs::path> remove_prefix(const fs::path& path, const fs::p
   return {true, rem};
 }
 
-static std::optional<fs::path> search(const std::unordered_map<fs::path, fs::path, stdshim::hash_path>& prefixes,
-                                      const fs::path& p) noexcept {
-  if(p.is_relative())
-    return std::nullopt;  // Can't do anything with a relative path
-  std::error_code ec;
-  for(const auto& ft: prefixes) {
-    auto xp = remove_prefix(p, ft.first);
-    if(xp.first) {
-      fs::path rp = ft.second / xp.second;
-      if(fs::is_regular_file(rp, ec)) return rp;
-    }
-  }
-  if(fs::is_regular_file(p, ec)) return p;  // If all else fails;
-  return std::nullopt;
-}
-
 void ProfArgs::StatisticsExtender::appendStatistics(const Metric& m, Metric::StatsAccess mas) noexcept {
   if(m.visibility() == Metric::Settings::visibility_t::invisible) return;
   Metric::Statistics s;
@@ -760,12 +773,51 @@ void ProfArgs::StatisticsExtender::appendStatistics(const Metric& m, Metric::Sta
   mas.requestStatistics(std::move(s));
 }
 
+static bool is_subpath(const fs::path& p, const fs::path& base) {
+  auto rel = p.lexically_relative(base);
+  assert(!rel.has_root_path());
+  return !rel.empty() && rel.native()[0] != '.';
+}
+
+static std::optional<fs::path> search(const std::unordered_map<fs::path, fs::path, stdshim::hash_path>& prefixes,
+                                      const fs::path& p) noexcept {
+  assert(!p.is_relative());
+  std::error_code ec;
+  for(const auto& ft: prefixes) {
+    auto xp = remove_prefix(p, ft.first);
+    if(xp.first) {
+      fs::path rp = ft.second / xp.second;
+      if(fs::is_regular_file(rp, ec)) return rp;
+    }
+  }
+  if(fs::is_regular_file(p, ec)) return p;  // If all else fails;
+  return std::nullopt;
+}
+
 std::optional<fs::path> ProfArgs::Prefixer::resolvePath(const File& f) noexcept {
-  return args.foreign ? std::nullopt : search(args.prefixes, f.path());
+  if(f.path().is_relative())
+    return std::nullopt;  // Do not resolve relative paths
+  auto result = search(args.prefixes, f.path());
+  if(args.foreign && std::none_of(args.allowedForeignDirs.begin(), args.allowedForeignDirs.end(),
+      [&](const auto& base){ return is_subpath(result.value_or(f.path()), base); })) {
+    // The path is not part of an allowed subtree in the foreign case.
+    // Return an empty path, meaning the path does not exist on the current filesystem.
+    return fs::path();
+  }
+  return result;
 }
 
 std::optional<fs::path> ProfArgs::Prefixer::resolvePath(const Module& m) noexcept {
-  return args.foreign ? std::nullopt : search(args.prefixes, m.path());
+  if(m.path().is_relative())
+    return std::nullopt;  // Do not resolve relative paths
+  auto result = search(args.prefixes, m.path());
+  if(args.foreign && std::none_of(args.allowedForeignDirs.begin(), args.allowedForeignDirs.end(),
+      [&](const auto& base){ return is_subpath(result.value_or(m.path()), base); })) {
+    // The path is not part of an allowed subtree in the foreign case.
+    // Return an empty path, meaning the path does not exist on the current filesystem.
+    return fs::path();
+  }
+  return result;
 }
 
 std::optional<std::pair<util::optional_ref<Context>, Context&>>

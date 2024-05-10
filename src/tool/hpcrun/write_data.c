@@ -79,12 +79,13 @@
 #include "../../lib/prof-lean/hpcio.h"
 #include "../../lib/prof-lean/hpcfmt.h"
 #include "../../lib/prof-lean/hpcrun-fmt.h"
+#include "../../lib/prof-lean/crypto-hash.h"
 
 #include "../../lib/support-lean/OSUtil.h"
 
 #ifdef ENABLE_GTPIN
-#include "gpu/intel/gtpin/gtpin-instrumentation.h"
-#include "gpu/intel/level0/level0-api.h"
+#include "gpu/api/intel/gtpin/gtpin-instrumentation.h"
+#include "gpu/api/intel/level0/level0-api.h"
 #endif
 
 //*****************************************************************************

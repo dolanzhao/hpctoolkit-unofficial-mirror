@@ -16,6 +16,8 @@ if cupti_dep.found()
 '''.strip().format(cupti_dep.version()) + '\n'
 endif
 
+features_msg += 'Torch Monitor support: @0@\n'.format(torch_monitor_dep.found() ? 'yes' : 'no')
+
 features_msg += 'AMD ROCm support: @0@\n'.format(rocm_dep.found() ? 'yes' : 'no')
 if rocm_dep.found()
   features_msg += '''

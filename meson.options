@@ -11,6 +11,12 @@ option(
 
 option('papi', type: 'feature', description: 'Enable PAPI metrics')
 option('cuda', type: 'feature', description: 'Enable CUDA metrics')
+option(
+  'torch_monitor_dir',
+  type: 'string',
+  value: '',
+  description: 'Full path to torch_monitor installation directory',
+)
 option('level0', type: 'feature', description: 'Enable Level 0 metrics')
 option(
   'gtpin',

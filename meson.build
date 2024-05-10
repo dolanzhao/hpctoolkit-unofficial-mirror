@@ -345,6 +345,25 @@ if cupti_dep.found()
   endif
 endif
 
+torch_monitor_includedir = include_directories(get_option('torch_monitor_dir') + '/include')
+if get_option('torch_monitor_dir') != ''
+  _torch_monitor_libdir = get_option('torch_monitor_dir') + '/lib'
+  torch_monitor_dep = cc.find_library('torch_monitor',  
+    required: false, 
+    dirs: [_torch_monitor_libdir],
+    has_headers: ['torch_monitor.h'],
+    header_include_directories: torch_monitor_includedir,
+  )
+  if torch_monitor_dep.found()
+    add_project_arguments(
+      '-DTORCH_MONITOR_ENABLE',
+      '-DHPCRUN_SS_TORCH_MONITOR', 
+      language: ['c', 'cpp'])
+  endif
+else
+  torch_monitor_dep = dependency('torch_monitor', required: false)
+endif
+
 
 # Find support for ROCm performance monitoring
 hip_dep = dependency('hip', method: 'cmake', modules: ['hip::amdhip64'], required: get_option('rocm'), version: '>=5.1')

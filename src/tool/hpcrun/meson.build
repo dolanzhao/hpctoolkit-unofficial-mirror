@@ -356,6 +356,17 @@ if cupti_dep.found()
   )
 endif
 
+if torch_monitor_dep.found()
+  _my_torch_monitor_files = files(
+    'sample-sources/torch-monitor/torch-monitor.c',
+    'sample-sources/torch-monitor/torch-monitor-api.c',
+    'sample-sources/torch-monitor/torch-monitor-function-cct-map.c',
+    'sample-sources/torch-monitor/torch-monitor-logical.c',
+    'sample-sources/torch-monitor/torch-monitor-op-placeholders.c',
+    'sample-sources/torch-monitor/torch-monitor-thread-obj.c',
+  )
+endif
+
 if opencl_dep.found()
   _my_opencl_files = files(
     'sample-sources/opencl.c',
@@ -480,6 +491,7 @@ _hpcrun_libs += shared_module('hpcrun',
   papi_dep.found() ? _my_papi_files : [],
   python_inst.found() ? ['logical/python.c'] : [],
   cupti_dep.found() ? _my_cupti_files : [],
+  torch_monitor_dep.found() ? _my_torch_monitor_files : [],
   rocm_dep.found() ? _my_rocm_files : [],
   level0_dep.found() ? _my_level0_files : [],
   opencl_dep.found() ? _my_opencl_files : [],
@@ -490,6 +502,7 @@ _hpcrun_libs += shared_module('hpcrun',
   gnu_symbol_visibility: 'hidden',
   link_language: 'c',
   implicit_include_directories: false,
+  include_directories: torch_monitor_includedir,
   dependencies: [
     _my_include_dirs_deps,
     prof_lean_deps,
@@ -500,6 +513,7 @@ _hpcrun_libs += shared_module('hpcrun',
     lzma_dep,
     libelf_dep,
     perfmon_dep,
+    torch_monitor_dep,
     xed_dep,
     papi_dep,
     rocm_dep.partial_dependency(compile_args: true, includes: true),

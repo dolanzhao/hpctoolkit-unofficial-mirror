@@ -4,3 +4,5 @@ __pycache__/
 !/.pre-commit-config.yaml
 !.pylintrc
 !.vermin
+.vscode/
+builddir/

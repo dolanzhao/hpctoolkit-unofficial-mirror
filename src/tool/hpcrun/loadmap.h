@@ -71,6 +71,9 @@
 
 #include "fnbounds/fnbounds_file_header.h"
 
+#ifndef __USE_GNU
+#define __USE_GNU 1
+#endif
 #include <link.h>
 
 //***************************************************************************

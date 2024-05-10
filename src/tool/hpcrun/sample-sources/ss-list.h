@@ -94,6 +94,10 @@ SAMPLE_SOURCE_DECL_MACRO(papi_c_intel)
 SAMPLE_SOURCE_DECL_MACRO(nvidia_gpu)
 #endif
 
+#ifdef HPCRUN_SS_TORCH_MONITOR
+SAMPLE_SOURCE_DECL_MACRO(torch_monitor)
+#endif
+
 #ifdef HPCRUN_SS_AMD
 SAMPLE_SOURCE_DECL_MACRO(amd_gpu)
 #endif

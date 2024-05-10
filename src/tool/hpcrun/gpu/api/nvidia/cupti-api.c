@@ -1215,12 +1215,13 @@ cupti_subscriber_callback
           if (unsafe) hpcrun_safe_exit();
 
 
-        gpu_op_ccts_map_insert(correlation_id, (gpu_op_ccts_map_entry_value_t) {
-          .gpu_op_ccts = gpu_op_ccts,
-          .cpu_submit_time = cpu_submit_time
-        });
-        // TODO: remove
-        gpu_correlation_channel_send(0, correlation_id, gpu_activity_channel_get_local());
+          gpu_op_ccts_map_insert(correlation_id, (gpu_op_ccts_map_entry_value_t) {
+            .gpu_op_ccts = gpu_op_ccts,
+            .cpu_submit_time = cpu_submit_time
+          });
+          // TODO: remove
+          gpu_correlation_channel_send(0, correlation_id, gpu_activity_channel_get_local());
+        }
 
         TMSG(CUPTI_TRACE, "Runtime push externalId %lu (cb_id = %u)", correlation_id, cb_id);
       } else if (cd->callbackSite == CUPTI_API_EXIT) {

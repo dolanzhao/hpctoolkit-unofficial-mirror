@@ -345,9 +345,9 @@ if cupti_dep.found()
   endif
 endif
 
-torch_monitor_includedir = include_directories(get_option('torch_monitor_dir') + '/include')
 if get_option('torch_monitor_dir') != ''
   _torch_monitor_libdir = get_option('torch_monitor_dir') + '/lib'
+  torch_monitor_includedir = include_directories(get_option('torch_monitor_dir') + '/include')
   torch_monitor_dep = cc.find_library('torch_monitor',  
     required: false, 
     dirs: [_torch_monitor_libdir],
@@ -361,6 +361,7 @@ if get_option('torch_monitor_dir') != ''
       language: ['c', 'cpp'])
   endif
 else
+  torch_monitor_includedir = include_directories('')
   torch_monitor_dep = dependency('torch_monitor', required: false)
 endif
 

@@ -1076,7 +1076,12 @@ cupti_subscriber_callback
 
         if (unsafe) hpcrun_safe_exit();
 
-        gpu_correlation_channel_produce(gpu_api_correlation_id, &gpu_op_ccts, cpu_submit_time);
+        gpu_op_ccts_map_insert(gpu_api_correlation_id, (gpu_op_ccts_map_entry_value_t) {
+          .gpu_op_ccts = gpu_op_ccts,
+          .cpu_submit_time = cpu_submit_time
+        });
+        // TODO: remove
+        gpu_correlation_channel_send(0, correlation_id, gpu_activity_channel_get_local());
       }
     } else if (is_kernel_op && ompt_runtime_api_flag && cd->callbackSite ==
       CUPTI_API_ENTER) {

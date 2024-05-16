@@ -1,3 +1,8 @@
+#include <assert.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <torch_monitor.h>
+
 #include "torch-monitor-api.h"
 
 #include "../../cct/cct.h"
@@ -5,9 +10,6 @@
 #include "../../safe-sampling.h"
 #include "../../sample_event.h"
 #include "../../thread_data.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include <torch_monitor.h>
 
 #include "torch-monitor-function-cct-map.h"
 #include "torch-monitor-logical.h"

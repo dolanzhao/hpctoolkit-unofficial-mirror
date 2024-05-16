@@ -1,3 +1,5 @@
+#include <assert.h>
+
 #include "torch-monitor-logical.h"
 
 #include "../../cct_backtrace_finalize.h"
